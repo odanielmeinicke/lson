@@ -8,7 +8,7 @@ import java.io.OutputStream;
 import java.io.Serializable;
 import java.io.Writer;
 
-public interface Json extends Serializable, Cloneable, Comparable<Json> {
+public interface Json extends Serializable, Cloneable {
 
     // Static initializers
 
