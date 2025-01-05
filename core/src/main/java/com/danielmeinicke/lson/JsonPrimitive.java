@@ -1,4 +1,6 @@
 package com.danielmeinicke.lson;
 
-public interface JsonPrimitive extends Json {
+import com.danielmeinicke.lson.path.filter.Parameter;
+
+public interface JsonPrimitive extends Json, Parameter {
 }

@@ -1,15 +1,16 @@
 package com.danielmeinicke.lson.path;
 
-import com.danielmeinicke.lson.JsonPrimitive;
-import com.danielmeinicke.lson.path.JsonPath.Comparator;
-import com.danielmeinicke.lson.path.JsonPath.*;
+import com.danielmeinicke.lson.Json;
+import com.danielmeinicke.lson.path.filter.Filter;
+import com.danielmeinicke.lson.path.segment.Segment;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import static com.danielmeinicke.lson.path.filter.Filter.*;
 
 public final class Builder {
 
@@ -34,24 +35,20 @@ public final class Builder {
     // Builder
 
     public @NotNull JsonPath build() {
-        @NotNull List<Node> nodes = new LinkedList<>();
-
-        for (@NotNull Object object : this.nodes) {
-            if (object instanceof NodeBuilder) {
-                @NotNull NodeBuilder builder = (NodeBuilder) object;
-
-                nodes.add(new NodeImpl(
-                        nodes,
-                        nodes.size(),
-                        builder.name,
-                        builder.operators.toArray(new Operator[0])
-                ));
-            } else {
-                nodes.add((Node) object);
-            }
-        }
-
-        return new JsonPathImpl(nodes.toArray(new Node[0]));
+        return null;
+//        @NotNull List<Node> nodes = new LinkedList<>();
+//
+//        for (@NotNull Object object : this.nodes) {
+//            if (object instanceof NodeBuilder) {
+//                @NotNull NodeBuilder builder = (NodeBuilder) object;
+//
+//                nodes.add(new NodeImpl(builder.name, builder.selectors.toArray(new Selector[0])));
+//            } else {
+//                nodes.add((Node) object);
+//            }
+//        }
+//
+//        return new JsonPathImpl(nodes.toArray(new Node[0]));
     }
 
     // Classes
@@ -63,7 +60,7 @@ public final class Builder {
         private final @NotNull Builder builder;
 
         private final @NotNull String name;
-        private final @NotNull List<Operator> operators = new LinkedList<>();
+        private final @NotNull List<Selector> selectors = new LinkedList<>();
 
         public NodeBuilder(@NotNull Builder builder, @NotNull String name) {
             this.builder = builder;
@@ -72,37 +69,32 @@ public final class Builder {
 
         // Operators
 
-        @Contract(value = "_,_,_->this")
-        public @NotNull NodeBuilder logical(@NotNull LogicalComparator.Type type, @NotNull Comparator first, @NotNull Comparator second) {
-            operators.add(new LogicalComparatorImpl(type, first, second));
-            return this;
-        }
-        @Contract(value = "_,_,_->this")
-        public @NotNull NodeBuilder primitive(@NotNull PrimitiveComparator.Type type, @NotNull Node node, @Nullable JsonPrimitive primitive) {
-            operators.add(new PrimitiveComparatorImpl(type, node, primitive));
+        @Contract(value = "_->this")
+        public @NotNull NodeBuilder filter(@NotNull Filter filter) {
+            selectors.add(filter);
             return this;
         }
 
         @Contract(value = "_,_,_->this")
         public @NotNull NodeBuilder array(int start, @Nullable Integer end, int step) {
-            operators.add(new ArraySliceImpl(start, end, step));
+            selectors.add(new SlicingImpl(start, end, step));
             return this;
         }
         @Contract(value = "->this")
         public @NotNull NodeBuilder array() {
-            operators.add(new ArraySliceImpl(0, null, 1));
+            selectors.add(new SlicingImpl(0, null, 1));
             return this;
         }
 
         @Contract(value = "_->this")
         public @NotNull NodeBuilder index(int index) {
-            operators.add(new ArrayPositionImpl(index));
+            selectors.add(new IndexImpl(index));
             return this;
         }
 
         @Contract(value = "->this")
         public @NotNull NodeBuilder wilcard() {
-            operators.add(new WildcardImpl());
+            selectors.add(new WildcardImpl());
             return this;
         }
 
@@ -113,42 +105,48 @@ public final class Builder {
 
     }
 
-    private static final class NodeImpl implements Node {
+    static final class NodeImpl implements Node {
 
-        private final @NotNull List<Node> nodes;
-        private final int index;
+        private final @Nullable String name;
+        private final @NotNull String original;
 
-        private final @NotNull String name;
+        private final @NotNull Segment @NotNull [] segments;
+        private final @Nullable Type type;
 
-        private final @NotNull Operator @NotNull [] operators;
-
-        public NodeImpl(@NotNull List<Node> nodes, int index, @NotNull String name, @NotNull Operator @NotNull [] operators) {
-            this.nodes = nodes;
-            this.index = index;
+        public NodeImpl(@Nullable String name, @NotNull String original, @NotNull Segment @NotNull [] segments, @Nullable Type type) {
             this.name = name;
-            this.operators = operators;
+            this.original = original;
+            this.segments = segments;
+            this.type = type;
         }
 
         // Getters
 
-        public @NotNull String getName() {
+        @Override
+        public @Nullable String getName() {
             return name;
         }
 
         @Override
-        public @Nullable Node getParent() {
-            return (index > 0 && index <= nodes.size()) ? nodes.get(index - 1) : null;
-        }
-        @Override
-        public @Nullable Node getChildren() {
-            return (index >= 0 && index + 1 < nodes.size()) ? nodes.get(index + 1) : null;
+        public @Nullable Type getType() {
+            return type;
         }
 
-        // Operators
+        @Override
+        public @NotNull Segment @NotNull [] getSegments() {
+            return segments;
+        }
+
+        // Modules
 
         @Override
-        public @NotNull Operator @NotNull [] getOperators() {
-            return operators;
+        public boolean contains(@NotNull Json json) {
+            return false;
+        }
+
+        @Override
+        public @Nullable Json get(@NotNull Json json) {
+            return null;
         }
 
         // CharSequence
@@ -173,74 +171,42 @@ public final class Builder {
         @Override
         public boolean equals(@Nullable Object object) {
             if (this == object) return true;
-            if (!(object instanceof NodeImpl)) return false;
-            @NotNull NodeImpl node = (NodeImpl) object;
-            return Objects.equals(getName(), node.getName()) && Objects.deepEquals(getOperators(), node.getOperators()) && Objects.equals(getParent(), node.getParent()) && Objects.equals(getChildren(), node.getChildren());
+            if (!(object instanceof Node)) return false;
+            @NotNull Node node = (Node) object;
+            return Objects.equals(getName(), node.getName()) && Objects.deepEquals(getSegments(), node.getSegments()) && getType() == node.getType();
         }
         @Override
         public int hashCode() {
-            return Objects.hash(getName(), getChildren(), getParent(), Arrays.hashCode(getOperators()));
+            return Objects.hash(getName(), Arrays.hashCode(getSegments()), getType());
         }
 
         @Override
         public @NotNull String toString() {
-            @NotNull StringBuilder builder = new StringBuilder();
-
-            // Add parent's names recursively from first
-            @Nullable Node parent = getParent();
-
-            while (parent != null) {
-                builder.append(parent.getName());
-                builder.append(".");
-
-                parent = parent.getParent();
-            }
-
-            // Flip parents
-            // todo: will split dots and brackets inside quotes also, this should not happen
-            @NotNull List<String> list = Arrays.asList(builder.toString().split("\\.|\\[]"));
-            Collections.reverse(list);
-
-            builder = new StringBuilder(list.stream().map(s -> s + ".").collect(Collectors.joining()));
-
-            // Add node name
-            builder.append(getName());
-
-            // Finish
-            return builder.toString();
+            return original;
         }
 
     }
-    private static final class LogicalComparatorImpl implements LogicalComparator {
+    static final class NameImpl implements Name {
 
-        // Object
+        private final @NotNull String string;
 
-        private final @NotNull Type type;
-
-        private final @NotNull Comparator first;
-        private final @NotNull Comparator second;
-
-        public LogicalComparatorImpl(@NotNull Type type, @NotNull Comparator first, @NotNull Comparator second) {
-            this.type = type;
-
-            this.first = first;
-            this.second = second;
+        public NameImpl(@NotNull String string) {
+            this.string = string;
         }
 
-        // Getters
+        // CharSequence
 
         @Override
-        public @NotNull Type getType() {
-            return type;
-        }
-
-        @Override
-        public @NotNull Comparator getFirst() {
-            return first;
+        public int length() {
+            return toString().length();
         }
         @Override
-        public @NotNull Comparator getSecond() {
-            return second;
+        public char charAt(int index) {
+            return toString().charAt(index);
+        }
+        @Override
+        public @NotNull CharSequence subSequence(int start, int end) {
+            return toString().subSequence(start, end);
         }
 
         // Implementations
@@ -248,93 +214,28 @@ public final class Builder {
         @Override
         public boolean equals(@Nullable Object object) {
             if (this == object) return true;
-            if (!(object instanceof LogicalComparatorImpl)) return false;
-            @NotNull LogicalComparatorImpl that = (LogicalComparatorImpl) object;
-            return getType() == that.getType() && Objects.equals(getFirst(), that.getFirst()) && Objects.equals(getSecond(), that.getSecond());
+            if (!(object instanceof Name)) return false;
+            @NotNull Name name = (Name) object;
+            return Objects.equals(toString(), name.toString());
         }
         @Override
         public int hashCode() {
-            return Objects.hash(getType(), getFirst(), getSecond());
+            return Objects.hashCode(toString());
         }
 
         @Override
         public @NotNull String toString() {
-            @NotNull Function<Comparator, String> replacer = new Function<Comparator, String>() {
-                @Override
-                public @NotNull String apply(@NotNull Comparator comparator) {
-                    // todo: will split dots and brackets inside quotes also, this should not happen
-                    @NotNull String string = comparator.toString().replaceFirst("\\?\\(|\\)", "");
-
-                    if (comparator instanceof LogicalComparator) {
-                        string = "(" + string + ")";
-                    }
-
-                    return string;
-                }
-            };
-
-            return "?(" + replacer.apply(getFirst()) + " " + getType() + " " + replacer.apply(getSecond()) + ")";
+            return string;
         }
 
     }
-    private static final class PrimitiveComparatorImpl implements PrimitiveComparator {
-
-        // Object
-
-        private final @NotNull Type type;
-
-        private final @NotNull Node node;
-        private final @Nullable JsonPrimitive primitive;
-
-        public PrimitiveComparatorImpl(@NotNull Type type, @NotNull Node node, @Nullable JsonPrimitive primitive) {
-            this.type = type;
-            this.node = node;
-            this.primitive = primitive;
-        }
-
-        // Getters
-
-        @Override
-        public @NotNull Type getType() {
-            return type;
-        }
-
-        @Override
-        public @NotNull Node getNode() {
-            return node;
-        }
-        @Override
-        public @Nullable JsonPrimitive getPrimitive() {
-            return primitive;
-        }
-
-        // Implementations
-
-        @Override
-        public boolean equals(@Nullable Object object) {
-            if (this == object) return true;
-            if (!(object instanceof PrimitiveComparatorImpl)) return false;
-            @NotNull PrimitiveComparatorImpl that = (PrimitiveComparatorImpl) object;
-            return getType() == that.getType() && Objects.equals(getNode(), that.getNode()) && Objects.equals(getPrimitive(), that.getPrimitive());
-        }
-        @Override
-        public int hashCode() {
-            return Objects.hash(getType(), getNode(), getPrimitive());
-        }
-
-        @Override
-        public @NotNull String toString() {
-            return "?(" + getNode() + " " + getType().getString() + " " + getPrimitive() + ")";
-        }
-
-    }
-    private static final class ArraySliceImpl implements ArraySlice {
+    static final class SlicingImpl implements Slicing {
 
         private final int start;
         private final @Nullable Integer end;
         private final int step;
 
-        public ArraySliceImpl(int start, @Nullable Integer end, int step) {
+        public SlicingImpl(int start, @Nullable Integer end, int step) {
             this.start = start;
             this.end = end;
             this.step = step;
@@ -360,8 +261,8 @@ public final class Builder {
         @Override
         public boolean equals(@Nullable Object object) {
             if (this == object) return true;
-            if (!(object instanceof ArraySlice)) return false;
-            @NotNull ArraySlice that = (ArraySlice) object;
+            if (!(object instanceof Slicing)) return false;
+            @NotNull Slicing that = (Slicing) object;
             return getStart() == that.getStart() && getStep() == that.getStep() && Objects.equals(getEnd(), that.getEnd());
         }
         @Override
@@ -384,11 +285,11 @@ public final class Builder {
         }
 
     }
-    private static final class ArrayPositionImpl implements ArrayPosition {
+    static final class IndexImpl implements Index {
 
         private final int index;
 
-        public ArrayPositionImpl(int index) {
+        public IndexImpl(int index) {
             this.index = index;
         }
 
@@ -410,8 +311,8 @@ public final class Builder {
         @Override
         public boolean equals(@Nullable Object object) {
             if (this == object) return true;
-            if (!(object instanceof ArrayPositionImpl)) return false;
-            @NotNull ArrayPositionImpl that = (ArrayPositionImpl) object;
+            if (!(object instanceof IndexImpl)) return false;
+            @NotNull Builder.IndexImpl that = (IndexImpl) object;
             return getIndex() == that.getIndex();
         }
         @Override
@@ -425,7 +326,7 @@ public final class Builder {
         }
 
     }
-    private static final class WildcardImpl implements Wildcard {
+    static final class WildcardImpl implements Wildcard {
 
         // Object
 
@@ -450,14 +351,16 @@ public final class Builder {
 
     }
 
-    private static final class JsonPathImpl implements JsonPath {
+    static final class JsonPathImpl implements JsonPath {
 
         // Object
 
         private final @NotNull Node @NotNull [] nodes;
+        private final @NotNull String original;
 
-        public JsonPathImpl(@NotNull Node @NotNull [] nodes) {
+        public JsonPathImpl(@NotNull Node @NotNull [] nodes, @NotNull String original) {
             this.nodes = nodes;
+            this.original = original;
         }
 
         // Getters
@@ -465,6 +368,18 @@ public final class Builder {
         @Override
         public @NotNull Node @NotNull [] getNodes() {
             return nodes;
+        }
+
+        // Modules
+
+        @Override
+        public boolean contains(@NotNull Json json) {
+            return false;
+        }
+
+        @Override
+        public @Nullable Json get(@NotNull Json json) {
+            return null;
         }
 
         // CharSequence
@@ -501,26 +416,50 @@ public final class Builder {
 
         @Override
         public @NotNull String toString() {
-            @NotNull StringBuilder builder = new StringBuilder();
-            @NotNull Node[] nodes = getNodes();
+            return original;
+        }
 
-            int row = 0;
-            for (@NotNull Node node : nodes) {
-                // Check last
-                boolean last = row + 1 == nodes.length;
-                row++;
+    }
 
-                // Start serializing
-                builder.append(node.getName());
+    static final class SegmentImpl implements Segment {
 
-                for (@NotNull Operator operator : node.getOperators()) {
-                    builder.append("[").append(operator).append("]");
-                }
+        private final @NotNull Selector @NotNull [] selectors;
 
-                if (!last) builder.append(".");
-            }
+        public SegmentImpl(@NotNull Selector selector) {
+            this.selectors = new Selector[] { selector };
+        }
+        public SegmentImpl(@NotNull Repeatable @NotNull ... repeatables) {
+            this.selectors = repeatables;
+        }
 
-            return builder.toString();
+        // Iterable and Stream
+
+        @Override
+        public @NotNull Stream<Selector> stream() {
+            return Arrays.stream(selectors);
+        }
+        @Override
+        public @NotNull Iterator<Selector> iterator() {
+            return Arrays.asList(selectors).iterator();
+        }
+
+        // Implementations
+
+        @Override
+        public boolean equals(@Nullable Object object) {
+            if (this == object) return true;
+            if (!(object instanceof Segment)) return false;
+            Segment that = (Segment) object;
+            return Objects.equals(iterator(), that.iterator());
+        }
+        @Override
+        public int hashCode() {
+            return Arrays.hashCode(selectors);
+        }
+
+        @Override
+        public @NotNull String toString() {
+            return Arrays.toString(selectors);
         }
 
     }

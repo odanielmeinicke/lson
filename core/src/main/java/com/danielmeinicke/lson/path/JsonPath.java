@@ -2,428 +2,420 @@ package com.danielmeinicke.lson.path;
 
 import com.danielmeinicke.lson.Json;
 import com.danielmeinicke.lson.JsonPrimitive;
+import com.danielmeinicke.lson.exception.path.NodeNotFoundException;
+import com.danielmeinicke.lson.path.Node.Type;
+import com.danielmeinicke.lson.path.Selector.Name;
+import com.danielmeinicke.lson.path.Selector.Repeatable;
+import com.danielmeinicke.lson.path.filter.ExistenceFilter;
+import com.danielmeinicke.lson.path.filter.Filter;
+import com.danielmeinicke.lson.path.filter.OperatorFilter;
+import com.danielmeinicke.lson.path.filter.OperatorFilter.Operator;
+import com.danielmeinicke.lson.path.segment.Segment;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.Serializable;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
- * Represents a JSON Path with enhanced functionalities, such as serialization,
- * string operations, and comparability. This interface serves as the primary
- * abstraction for handling complex JSON path operations, enabling easy manipulation
- * and querying of JSON data.
+ * Represents a JSON path that provides access to elements within a JSON structure.
+ * This interface extends both {@link Serializable} and {@link CharSequence}, enabling
+ * serialization and character-based operations.
+ *
+ * <p>A {@code JsonPath} is a sequence of nodes that can be used to navigate and extract
+ * data from a JSON document. Each node represents a step in the path, which may include
+ * keys, array indices, or other JSON constructs.</p>
  */
 public interface JsonPath extends Serializable, CharSequence {
 
+    // Static initializers
+
+    public static void main(String[] args) {
+        @NotNull JsonPath path = read("$.node[?(@.name < 10)][?(@.name)][?(@.name['test'])].e.['test . []', 'ada'][0][ 3 3 ][0:][::12]");
+
+        for (@NotNull Node node : path.getNodes()) {
+            System.out.println(node + ":");
+            for (@NotNull Segment segment : node.getSegments()) {
+                System.out.println("  " + segment + ": " + segment.getClass().getSimpleName() + " - " + segment.stream().toArray(Selector[]::new)[0].getClass().getSimpleName());
+            }
+        }
+
+//        System.out.println(path);
+    }
+
     /**
-     * Retrieves the nodes that constitute this JSON Path. Nodes can include
-     * root nodes, child nodes, and other structural components of the path.
+     * Creates a {@link JsonPath} instance by parsing the given string representation of a JSON path.
      *
-     * @return a stream of {@link Node} objects representing the components of this JSON Path.
+     * @param string the string representation of the JSON path, which must not be null or invalid.
+     * @return a {@code JsonPath} instance that corresponds to the given string.
+     * @throws IllegalArgumentException if the string is null, empty, or contains an invalid JSON path format.
+     */
+    static @NotNull JsonPath read(@NotNull String string) {
+        final @NotNull String original = string;
+
+        // Split nodes
+        @NotNull List<String> stringNodes = new LinkedList<>();
+
+        {
+            @NotNull List<Integer> split = new LinkedList<>();
+
+            boolean escaped = false;
+            boolean quotes = false; // true if a ' or " has found
+            @NotNull LinkedList<Integer> brackets = new LinkedList<>(); // a list containing all '[' indexes
+
+            int row = 0;
+            for (char character : original.toCharArray()) {
+                final boolean isQuotes = (character == '"' || character == '\'');
+
+                // Escaped
+                if (character == '\\') {
+                    escaped = true;
+                }
+
+                // Mark quotes
+                if (!escaped && isQuotes) {
+                    quotes = !quotes;
+                }
+
+                // Check if is a node split
+                if (character == '.' && brackets.isEmpty()) {
+                    split.add(row);
+                } else if (!quotes) {
+                    if (character == '[') {
+                        brackets.add(row);
+                    } else if (character == ']') {
+                        if (!brackets.isEmpty()) {
+                            brackets.removeLast();
+                        } else {
+                            throw new IllegalStateException("illegal close bracket at index " + row + ": " + original);
+                        }
+                    }
+                }
+
+                // Finish
+                if (character != '\\') {
+                    escaped = false;
+                }
+
+                row++;
+            }
+
+            if (!brackets.isEmpty()) {
+                throw new IllegalStateException("bracked at index" + (brackets.size() == 1 ? "" : "es") + " " + brackets.toString().replace("[", "").replace("]", "") + " not closed");
+            }
+
+            // Finish
+            for (row = 0; row < split.size(); row++) {
+                // Get start and end substring indexes
+                int start = split.get(row);
+                int end = row + 1 < split.size() ? split.get(row + 1) : original.length();
+
+                // Remove split nodes
+                if (original.charAt(start) == '.') start += 1;
+                else start += 2;
+
+                // Add node to list
+                stringNodes.add(original.substring(start, end).trim());
+            }
+        }
+
+        // Retrieve segments and generate node instance
+        @NotNull List<Node> nodes = new LinkedList<>();
+
+        for (@NotNull String node : stringNodes) {
+            @Nullable Type type = null;
+
+            // Determine node type
+            for (@NotNull Type meta : Type.values()) {
+                if (node.startsWith(String.valueOf(meta.getCharacter()))) {
+                    type = meta;
+                    break;
+                }
+            }
+
+            // Retrieve names
+            @NotNull LinkedList<StringBuilder> segmentsList = new LinkedList<>();
+            @Nullable String name = null;
+
+            {
+                boolean brackets = node.startsWith("[");
+                boolean naming = !brackets;
+
+                boolean quotes = false;
+                boolean escaped = false;
+
+                // Parse nodes
+                for (char character : node.toCharArray()) {
+                    final boolean isQuotes = (character == '"' || character == '\'');
+
+                    // Escaped
+                    if (character == '\\') {
+                        escaped = true;
+                    }
+
+                    // Mark quotes
+                    if (!escaped && isQuotes) {
+                        quotes = !quotes;
+                    }
+
+                    // Select name
+                    if (character == '[' && !quotes) {
+                        brackets = true;
+                        naming = false;
+                    } if (naming) {
+                        name = (name == null ? "" : name) + character;
+                    }
+
+                    // Start segments
+                    if (brackets) {
+                        // Create a new segment
+                        if (character == '[' && !quotes) {
+                            segmentsList.add(new StringBuilder().append(character));
+                        } else {
+                            // Retrive last segment and add character to it
+                            @NotNull StringBuilder segment = segmentsList.getLast();
+                            segment.append(character);
+
+                            if (character == ']' && !quotes) {
+                                brackets = false;
+                            }
+                        }
+                    }
+
+                    // Finish
+                    if (character != '\\') {
+                        escaped = false;
+                    }
+                }
+            }
+
+            // Parse segments
+            @NotNull List<Segment> segments = new LinkedList<>();
+
+            for (@NotNull String segment : segmentsList.stream().map(StringBuilder::toString).collect(Collectors.toList())) {
+                boolean quotesBefore = true;
+                boolean quotes = false;
+                boolean escaped = false;
+                boolean comma = false;
+
+                @Nullable Class<? extends Selector> scope = null;
+                @NotNull List<Character> data = new LinkedList<>();
+
+                // Segments
+                @NotNull LinkedList<StringBuilder> names = new LinkedList<>();
+                @NotNull StringBuilder index = new StringBuilder();
+
+                @NotNull StringBuilder signal = new StringBuilder();
+                @NotNull StringBuilder target = new StringBuilder();
+                int s = 0;
+
+                boolean inverted = false;
+                @NotNull LinkedList<Integer> brackets = new LinkedList<>();
+
+                // Start reading
+                char[] chars = segment.toCharArray();
+                for (int row = 0; row < chars.length ; row++) {
+                    final char character = chars[row];
+                    final boolean isQuotes = (character == '"' || character == '\'');
+
+                    // Skip first bracket
+                    if (row == 0) {
+                        continue;
+                    }
+
+                    // Escaped
+                    if (character == '\\') {
+                        escaped = true;
+                    }
+
+                    // Mark quotes
+                    if (!escaped && isQuotes) {
+                        quotes = !quotes;
+                        quotesBefore = !quotes;
+                    } if (character == ' ' && !quotes && scope != OperatorFilter.class) {
+                        continue;
+                    }
+
+                    // Determine selector scope
+                    if (scope == null) {
+                        if (character == '?') { // It's a filter selector
+                            for (@NotNull Operator operator : Operator.values()) {
+                                if (segment.contains(operator.getSymbol())) {
+                                    scope = OperatorFilter.class;
+                                }
+                            }
+
+                            if (scope == null) {
+                                scope = ExistenceFilter.class;
+                            }
+                        } else if (character == '\'' || character == '"') { // It's a name selector
+                            scope = Name.class;
+                        } else if ((character >= '0' && character <= '9') || character == ':') { // It's an index or slicing selector
+                            if (segment.contains(":")) {
+                                scope = Selector.Slicing.class;
+                            } else {
+                                scope = Selector.Index.class;
+                            }
+                        } else if (character == '*') { // It's a wildcard selector
+                            scope = Selector.Wildcard.class;
+                        } else {
+                            throw new IllegalStateException("invalid segment start character '" + character + "': " + segment);
+                        }
+                    }
+
+                    if (scope == Name.class) {
+                        if (character == ']' && !quotes) {
+                            @NotNull List<Repeatable> repeatables = new LinkedList<>();
+
+                            for (@NotNull StringBuilder builder : names) {
+                                repeatables.add(new Builder.NameImpl(builder.toString()));
+                            }
+
+                            segments.add(new Builder.SegmentImpl(repeatables.toArray(new Repeatable[0])));
+                        } else {
+                            if (quotes && !names.isEmpty() && (!isQuotes || escaped)) {
+                                @NotNull StringBuilder builder = names.getLast();
+                                builder.append(character);
+                            } if (character == ',') {
+                                comma = true;
+                            }
+
+                            if (isQuotes && !quotesBefore) {
+                                if ((comma || names.isEmpty())) {
+                                    names.add(new StringBuilder());
+                                    comma = false;
+                                } else {
+                                    throw new IllegalStateException("name selector missing comma between names: " + segment);
+                                }
+                            }
+                        }
+                    } else if (scope == Selector.Wildcard.class) {
+                        segments.add(new Builder.SegmentImpl(new Builder.WildcardImpl()));
+                    } else if (scope == Selector.Index.class) {
+                        if (character == ']') {
+                            int i;
+
+                            try {
+                                i = Integer.parseInt(index.toString());
+                            } catch (@NotNull NumberFormatException e) {
+                                throw new IllegalStateException("cannot parse index selector " + index, e);
+                            }
+
+                            segments.add(new Builder.SegmentImpl(new Builder.IndexImpl(i)));
+                        } else {
+                            index.append(character);
+                        }
+                    } else if (scope == Selector.Slicing.class) {
+                        if (character == ']') {
+                            @NotNull String @NotNull [] parts = index.toString().split(":");
+
+                            int start = parts.length > 0 && !parts[0].isEmpty() ? Integer.parseInt(parts[0]) : 0;
+                            @Nullable Integer end = parts.length > 1 && !parts[1].isEmpty() ? Integer.valueOf(parts[1]) : null;
+                            int step = parts.length > 2 && !parts[2].isEmpty() ? Integer.parseInt(parts[2]) : 1;
+
+                            segments.add(new Builder.SegmentImpl(new Builder.SlicingImpl(start, end, step)));
+                        } else {
+                            index.append(character);
+                        }
+                    } else if (scope == OperatorFilter.class) {
+                        // ((a && b) || c)
+
+                        if (character == '?') {
+                            continue;
+                        } else if (character == ' ') {
+                            s++;
+                        } else if (character == ']') {
+                            System.out.println(target + " - " + signal + " - " + index);
+                        } else if (s == 0) {
+                            target.append(character);
+                        } else if (s == 1) {
+                            signal.append(character);
+                        } else {
+                            index.append(character);
+                        }
+                    } else if (scope == ExistenceFilter.class) {
+                        // 5 == (d + 10)
+
+                        if (character == '!' && !quotes) {
+                            if (inverted) {
+                                throw new IllegalStateException("this existence filter is already inverted");
+                            } else if (index.length() > 0) {
+                                throw new IllegalStateException("illegal character position '" + character + "': " + segment);
+                            } else {
+                                inverted = true;
+                            }
+                        }
+
+                        if (character == '(' || character == ')' && brackets.isEmpty()) {
+                            index.append(character);
+                            continue;
+                        } else if (character == '[') {
+                            brackets.add(row);
+                        } else if (character == ']' && !brackets.isEmpty()) {
+                            brackets.removeLast();
+                        }
+
+                        index.append(character);
+                        if (character == ']' && brackets.isEmpty()) {
+                            segments.add(new Builder.SegmentImpl(new ExistenceFilter(new Builder.NodeImpl("test", index.toString(), new Segment[0], null))));
+                        }
+                    } else {
+                        throw new UnsupportedOperationException("unsupported scope: " + scope.getName());
+                    }
+
+                    // Finish
+                    if (character != '\\') {
+                        escaped = false;
+                    }
+
+                    quotesBefore = false;
+                }
+            }
+
+            nodes.add(new Builder.NodeImpl(name, node, segments.toArray(new Segment[0]), type));
+        }
+
+        // Finish creating the json path instance
+        return new Builder.JsonPathImpl(nodes.toArray(new Node[0]), original);
+    }
+
+    // Object
+
+    /**
+     * Retrieves an array of {@link Node} objects representing the individual components
+     * of this JSON path.
+     *
+     * @return a non-null array of {@code Node} objects. The array will always contain at least one node.
      */
     @NotNull Node @NotNull [] getNodes();
 
     /**
-     * Represents a component of a JSON Path, such as a node or key. A node may point
-     * to a specific object or property within the JSON structure and allows navigation
-     * between hierarchical levels.
+     * Determines if the given JSON object contains the element or structure specified by this JSON path.
+     *
+     * <p>This method evaluates the JSON path against the provided JSON object and checks
+     * whether the path resolves to a valid element within the object.</p>
+     *
+     * @param json the {@link Json} object to be checked, which must not be null.
+     * @return {@code true} if the JSON object contains the specified element or structure,
+     *         {@code false} otherwise.
+     * @throws IllegalArgumentException if the JSON object is null.
      */
-    interface Node extends CharSequence {
-
-        /**
-         * Retrieves the name of this node. Could be '@' for a current node, '$' for a root node
-         * or any other custom name.
-         *
-         * @return the name for this node
-         */
-        @NotNull String getName();
-
-        /**
-         * Retrieves the parent node of this node, representing the previous level
-         * in the JSON Path hierarchy. If this node is the root, the parent is null.
-         *
-         * @return the parent {@link Node}, or null if this is the root node.
-         */
-        @Nullable
-        Node getParent();
-
-        /**
-         * Retrieves the child node of this node, representing the next level
-         * in the JSON Path hierarchy. If this node is a leaf node, the child is null.
-         *
-         * @return the child {@link Node}, or null if this is a leaf node.
-         */
-        @Nullable
-        Node getChildren();
-
-        /**
-         * Checks if this node represents the root of a JSON Path. The root is typically
-         * denoted by the "$" symbol.
-         *
-         * @return true if this node is the root; false otherwise.
-         */
-        default boolean isRoot() {
-            return getName().trim().equals("$");
-        }
-
-        /**
-         * Checks if this node represents the current node in a JSON Path. The current
-         * node is typically denoted by the "@" symbol.
-         *
-         * @return true if this node represents the current node; false otherwise.
-         */
-        default boolean isCurrent() {
-            return getName().trim().equals("@");
-        }
-
-        /**
-         * Returns a stream of operators associated with this node.
-         * A node could have multiples operators, since it doesn't conflict themselves.
-         *
-         * @return a stream in order containing all the operators
-         */
-        @NotNull Operator @NotNull [] getOperators();
-
-    }
+    boolean contains(@NotNull Json json);
 
     /**
-     * Represents an operator in JSON Path expressions. Operators are used in various
-     * operations, such as filtering, slicing arrays, or performing logical comparisons.
+     * Retrieves the element or structure from the specified JSON object that corresponds to this JSON path.
+     *
+     * <p>If the JSON path resolves to a valid element, the method returns the element.
+     * If the resolved element is a JSON null primitive, the method returns {@code null}.</p>
+     *
+     * @param json the {@link Json} object from which the element should be retrieved, which must not be null.
+     * @return the resolved {@link Json} element, or {@code null} if the resolved element is a JSON null primitive.
+     * @throws NodeNotFoundException if the JSON object does not contain the element or structure specified
+     *                               by this JSON path.
+     * @throws IllegalArgumentException if the JSON object is null.
      */
-    interface Operator extends Serializable, Cloneable {
-        /**
-         * Converts the operator to its string representation. This is used for serialization
-         * and generating JSON Path queries.
-         *
-         * @return the string representation of the operator.
-         */
-        @Override
-        @NotNull String toString();
-    }
-
-    /**
-     * Represents a comparator in JSON Path expressions. Comparators are used to compare
-     * JSON elements, such as checking for equality or inequality.
-     */
-    interface Comparator extends Operator {
-        /**
-         * Converts the comparator to its string representation, which is typically the
-         * symbol or keyword representing the operation (e.g., "==", "!=").
-         *
-         * @return the string representation of the comparator.
-         */
-        @Override
-        @NotNull String toString();
-
-        /**
-         * Validates whether the comparator is applicable to a given JSON structure.
-         * This method ensures the comparator can operate on the provided JSON data.
-         *
-         * @param json the JSON data to validate.
-         * @return true if the comparator is valid for the provided JSON; false otherwise.
-         */
-        boolean validate(@NotNull Json json);
-    }
-
-    /**
-     * Represents a logical comparator, which combines two other comparators with a logical
-     * operation, such as 'AND' (&&) or 'OR' (||). Logical comparators allow for complex queries
-     * involving multiple conditions.
-     */
-    interface LogicalComparator extends Comparator {
-
-        /**
-         * Retrieves the primary comparator in the logical operation.
-         *
-         * @return the primary {@link Comparator} used in this logical operation.
-         */
-        @NotNull Comparator getFirst();
-
-        /**
-         * Retrieves the secondary comparator in the logical operation.
-         *
-         * @return the secondary {@link Comparator} used in this logical operation.
-         */
-        @NotNull Comparator getSecond();
-
-        /**
-         * Retrieves the type of logical operation performed by this comparator.
-         * The type defines whether the operation is an AND or an OR.
-         *
-         * @return the {@link Type} of logical operation.
-         */
-        @NotNull Type getType();
-
-        /**
-         * Automatically validates JSON path's value using both comparators
-         *
-         * @param json the JSON data to validate.
-         * @return true if both comparators matches with the specified json
-         */
-        @Override
-        default boolean validate(@NotNull Json json) {
-            return getFirst().validate(json) && getSecond().validate(json);
-        }
-
-        /**
-         * Represents the type of logical operation in a {@link LogicalComparator}.
-         */
-        enum Type {
-
-            /** Logical AND operation, denoted by "&&". */
-            AND("&&"),
-
-            /** Logical OR operation, denoted by "||". */
-            OR("||"),
-            ;
-
-            private final @NotNull String string;
-
-            /**
-             * Constructs a new logical operation type with the specified string representation.
-             *
-             * @param string the string representation of the logical operation.
-             */
-            Type(@NotNull String string) {
-                this.string = string;
-            }
-
-            /**
-             * Retrieves the string representation of this logical operation type.
-             *
-             * @return the string representation.
-             */
-            public @NotNull String getString() {
-                return string;
-            }
-
-            /**
-             * Converts the logical operation type to its string representation.
-             *
-             * @return the string representation of the logical operation type.
-             */
-            @Override
-            public @NotNull String toString() {
-                return getString();
-            }
-        }
-    }
-
-    /**
-     * Represents a primitive comparator, which compares JSON primitive values.
-     * These comparators can be used to evaluate conditions such as equality,
-     * inequality, or numerical comparisons.
-     */
-    interface PrimitiveComparator extends Comparator {
-
-        /**
-         * Retrieves the node to the JSON element being compared.
-         *
-         * @return the {@link Node} representing the JSON element.
-         */
-        @NotNull Node getNode();
-
-        /**
-         * Retrieves the primitive value being compared against. This value
-         * is the target of the comparison.
-         *
-         * @return the {@link JsonPrimitive} value to compare against, or null if none is set.
-         */
-        @Nullable JsonPrimitive getPrimitive();
-
-        /**
-         * Retrieves the type of comparison being performed. The type defines
-         * the specific operation (e.g., equality, greater than, etc.).
-         *
-         * @return the {@link Type} of comparison.
-         */
-        @NotNull Type getType();
-
-        /**
-         * Automatically validates JSON path's value using the primitive comparator's type
-         *
-         * @param json the JSON data to validate.
-         * @return true if the specified json matches with the comparator
-         */
-        @Override
-        default boolean validate(@NotNull Json json) {
-            if (!json.isPrimitive()) {
-                throw new IllegalArgumentException("the primitive comparator's json validator must be a primitive!");
-            }
-
-            return getType().validate(json.getAsPrimitive());
-        }
-
-        /**
-         * Defines the types of primitive comparisons available in JSON Path expressions.
-         */
-        enum Type {
-
-            /** Equality comparison, denoted by "==". */
-            EQUAL("==") {
-                @Override
-                public boolean validate(@NotNull JsonPrimitive primitive) {
-                    return true;
-                }
-                @Override
-                public boolean compare(@NotNull JsonPrimitive from, @NotNull JsonPrimitive with) {
-                    return from.equals(with);
-                }
-            },
-
-            /** Inequality comparison, denoted by "!=". */
-            DIFFERENT("!=") {
-                @Override
-                public boolean validate(@NotNull JsonPrimitive primitive) {
-                    return true;
-                }
-                @Override
-                public boolean compare(@NotNull JsonPrimitive from, @NotNull JsonPrimitive with) {
-                    return !from.equals(with);
-                }
-            },
-
-            /** Less-than comparison, denoted by "<". */
-            LESS_THAN("<") {
-                @Override
-                public boolean validate(@NotNull JsonPrimitive primitive) {
-                    return primitive.isNumber();
-                }
-                @Override
-                public boolean compare(@NotNull JsonPrimitive from, @NotNull JsonPrimitive with) {
-                    return with.compareTo(from) < 0;
-                }
-            },
-
-            /** Less-than-or-equal comparison, denoted by "<=". */
-            LESS_THAN_OR_EQUAL("<=") {
-                @Override
-                public boolean validate(@NotNull JsonPrimitive primitive) {
-                    return primitive.isNumber();
-                }
-                @Override
-                public boolean compare(@NotNull JsonPrimitive from, @NotNull JsonPrimitive with) {
-                    return with.compareTo(from) <= 0;
-                }
-            },
-
-            /** Greater-than comparison, denoted by ">". */
-            MORE_THAN(">") {
-                @Override
-                public boolean validate(@NotNull JsonPrimitive primitive) {
-                    return primitive.isNumber();
-                }
-                @Override
-                public boolean compare(@NotNull JsonPrimitive from, @NotNull JsonPrimitive with) {
-                    return with.compareTo(from) > 0;
-                }
-            },
-
-            /** Greater-than-or-equal comparison, denoted by ">=". */
-            MORE_THAN_OR_EQUAL(">=") {
-                @Override
-                public boolean validate(@NotNull JsonPrimitive primitive) {
-                    return primitive.isNumber();
-                }
-                @Override
-                public boolean compare(@NotNull JsonPrimitive from, @NotNull JsonPrimitive with) {
-                    return with.compareTo(from) >= 0;
-                }
-            },
-            ;
-
-            private final @NotNull String string;
-
-            /**
-             * Constructs a new comparison type with the specified string representation.
-             *
-             * @param string the string representation of the comparison type.
-             */
-            Type(@NotNull String string) {
-                this.string = string;
-            }
-
-            /**
-             * Retrieves the string representation of this comparison type.
-             *
-             * @return the string representation.
-             */
-            public @NotNull String getString() {
-                return string;
-            }
-
-            /**
-             * Validates whether the comparison type is applicable to the provided JSON primitive.
-             *
-             * @param primitive the JSON primitive to validate.
-             * @return true if the comparison type is valid; false otherwise.
-             */
-            public abstract boolean validate(@NotNull JsonPrimitive primitive);
-
-            /**
-             * Performs the comparison between two JSON primitives based on this type.
-             *
-             * @param from the first JSON primitive.
-             * @param with the second JSON primitive.
-             * @return true if the comparison condition is met; false otherwise.
-             */
-            public abstract boolean compare(@NotNull JsonPrimitive from, @NotNull JsonPrimitive with);
-
-            /**
-             * Converts the comparison type to its string representation.
-             *
-             * @return the string representation of the comparison type.
-             */
-            @Override
-            public @NotNull String toString() {
-                return getString();
-            }
-        }
-    }
-
-    /**
-     * Represents a wildcard operator in JSON Path expressions. Wildcards are used
-     * to match multiple elements in a JSON structure, such as all properties or array items.
-     */
-    interface Wildcard extends Operator {
-    }
-
-    /**
-     * Represents a specific position within an array in JSON Path expressions.
-     * This operator allows access to an individual array element by its index.
-     */
-    interface ArrayPosition extends Operator, Comparable<Integer> {
-    }
-
-    /**
-     * Represents an array slice in JSON Path expressions. Slices allow access
-     * to a range of elements within an array, defined by a start index, an optional
-     * end index, and a step value.
-     */
-    interface ArraySlice extends Operator {
-
-        /**
-         * Retrieves the starting index of the slice. The start index is inclusive.
-         *
-         * @return the start index of the array slice.
-         */
-        int getStart();
-
-        /**
-         * Retrieves the ending index of the slice, if specified. The end index is exclusive.
-         * If the end index is null, the slice extends to the end of the array.
-         *
-         * @return the end index of the array slice, or null if not specified.
-         */
-        @Nullable Integer getEnd();
-
-        /**
-         * Retrieves the step value of the slice. The step defines the interval
-         * between consecutive elements in the slice.
-         *
-         * @return the step value of the array slice.
-         */
-        int getStep();
-    }
+    @Nullable Json get(@NotNull Json json);
 
 }
