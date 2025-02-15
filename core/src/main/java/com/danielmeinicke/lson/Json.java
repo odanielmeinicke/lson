@@ -1,13 +1,17 @@
 package com.danielmeinicke.lson;
 
-import com.danielmeinicke.lson.path.JsonPath;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
+import java.io.IOException;
 import java.io.OutputStream;
 import java.io.Serializable;
 import java.io.Writer;
 
+/**
+ * Essa interface representa um Json.
+ *
+ * 1. Caso seja um Json String, mas esse string esteja no formato de um numero tipo "123", ao executar #getAsNumber ou #getAsInteger uma instância válida do numero respectivo será criado. Essa regra não se aplica ao JsonObject nem JsonArray.
+ */
 public interface Json extends Serializable, Cloneable {
 
     // Static initializers
@@ -20,19 +24,21 @@ public interface Json extends Serializable, Cloneable {
 
     boolean isNumber();
     boolean isString();
+    boolean isBoolean();
 
     @NotNull JsonObject getAsObject();
     @NotNull JsonArray getAsArray();
     @NotNull JsonPrimitive getAsPrimitive();
+    @NotNull JsonNumber getAsNumber();
 
     @NotNull String getAsString();
-
-    // Query
-
-    @NotNull Json query(@NotNull JsonPath path);
-    void remove(@NotNull JsonPath path);
-
-    void set(@NotNull JsonPath path, @Nullable Json json);
+    boolean getAsBoolean();
+    int getAsInteger();
+    double getAsDouble();
+    float getAsFloat();
+    short getAsShort();
+    long getAsLong();
+    byte getAsByte();
 
     // Getters
 
@@ -47,8 +53,8 @@ public interface Json extends Serializable, Cloneable {
 
     // Writers
 
-    void write(@NotNull Writer writer);
-    void write(@NotNull OutputStream stream);
+    void write(@NotNull Writer writer) throws IOException;
+    void write(@NotNull OutputStream stream) throws IOException;
 
     // Cloneable
 
