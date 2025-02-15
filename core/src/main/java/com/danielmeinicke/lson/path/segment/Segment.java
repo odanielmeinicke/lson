@@ -6,7 +6,5 @@ import org.jetbrains.annotations.NotNull;
 import java.util.stream.Stream;
 
 public interface Segment extends Iterable<Selector> {
-
     @NotNull Stream<Selector> stream();
-
 }

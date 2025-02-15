@@ -1,24 +1,12 @@
 package com.danielmeinicke.lson.path;
 
+import com.danielmeinicke.lson.path.filter.Parameter;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.Serializable;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
-/**
- * Represents a selector used in JSON Path expressions to navigate and query JSON structures.
- * A selector identifies specific elements, ranges, or patterns within a JSON document.
- * <p>
- * This interface includes various nested subinterfaces and implementations for
- * specific types of selectors, such as {@link Name}, {@link Slicing}, {@link Wildcard},
- * {@link Repeatable}, and {@link Index}. These types represent key components
- * of JSON Path syntax.
- * </p>
- */
 public interface Selector extends Serializable, Cloneable {
 
     /**
@@ -30,51 +18,6 @@ public interface Selector extends Serializable, Cloneable {
      */
     @Override
     @NotNull String toString();
-
-    /**
-     * Represents a JSON Path name selector, which matches a property name or key in a JSON object.
-     * A {@code Name} selector is used to access specific properties within a JSON structure.
-     * <p>
-     * This interface also provides utility methods for parsing strings into multiple {@code Name}
-     * instances, allowing for JSON Path expressions with quoted or escaped names.
-     * </p>
-     */
-    // todo: replace with JsonString
-    interface Name extends Repeatable, CharSequence {
-
-        /**
-         * Parses a given string into an array of {@link Name} objects. The string may include
-         * quoted names, with support for escaped quotes.
-         * <p>
-         * Example:
-         * <pre>
-         *     String input = "'key1', \"key2\", 'key\\'3'";
-         *     Name[] names = Name.read(input);
-         * </pre>
-         * <p>
-         * Regex explanation for matching names:
-         * <ul>
-         * <li>{@code (?<!\\\\)} - Ensures that a quote is not preceded by an escape character.</li>
-         * <li>{@code (['\"])} - Matches either a single or double quote.</li>
-         * <li>{@code (.*?)} - Lazily captures the content of the quote.</li>
-         * <li>{@code \\1} - Ensures the closing quote matches the opening quote.</li>
-         * </ul>
-         *
-         * @param string the input string containing quoted JSON Path names.
-         * @return an array of parsed {@code Name} objects.
-         * @throws IllegalArgumentException if the input string has invalid formatting.
-         */
-        static @NotNull Name @NotNull [] read(@NotNull String string) {
-            @NotNull List<Name> list = new LinkedList<>();
-            @NotNull Pattern pattern = Pattern.compile("(?<!\\\\)(['\"])(.*?)(?<!\\\\)\\1");
-            @NotNull Matcher matcher = pattern.matcher(string);
-            while (matcher.find()) {
-                @NotNull String read = matcher.group(2);
-                list.add(new Builder.NameImpl(read));
-            }
-            return list.toArray(new Name[0]);
-        }
-    }
 
     /**
      * Represents an array slicing operation in JSON Path. Array slicing allows
@@ -137,16 +80,8 @@ public interface Selector extends Serializable, Cloneable {
      * in a JSON structure. This is a marker interface for selectors like {@link Index}
      * that are inherently iterable or repeatable.
      */
-    interface Repeatable extends Selector {
+    interface Repeatable extends Selector, Iterable<Parameter> {
+        @NotNull Stream<Parameter> stream();
     }
 
-    /**
-     * Represents a selector for a specific position within a JSON array. This is used
-     * to access an individual element by its index.
-     * <p>
-     * For example, {@code $[2]} retrieves the element at index 2 of an array.
-     */
-    // todo: replace with JsonInteger
-    interface Index extends Repeatable, Comparable<Integer> {
-    }
 }
