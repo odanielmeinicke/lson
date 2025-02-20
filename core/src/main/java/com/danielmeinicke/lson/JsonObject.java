@@ -1,13 +1,14 @@
 package com.danielmeinicke.lson;
 
 import com.danielmeinicke.lson.path.JsonPath;
+import com.danielmeinicke.lson.path.Queryable;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Comparator;
 import java.util.Map;
 
-public interface JsonObject extends Json, Map<@NotNull String, @Nullable Json> {
+public interface JsonObject extends Json, Queryable, Map<@NotNull String, @Nullable Json> {
 
     void sort(@NotNull Comparator<Json> comparator);
 
@@ -18,5 +19,7 @@ public interface JsonObject extends Json, Map<@NotNull String, @Nullable Json> {
 
     void merge(@NotNull JsonObject object);
     void merge(@NotNull JsonObject object, boolean override);
+
+    @NotNull JsonObject deepClone();
 
 }

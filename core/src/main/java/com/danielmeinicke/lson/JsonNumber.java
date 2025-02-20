@@ -1,12 +1,6 @@
 package com.danielmeinicke.lson;
 
-public interface JsonNumber extends JsonPrimitive, Comparable<Number> {
+import com.danielmeinicke.lson.path.filter.Parameter;
 
-    int getAsInteger();
-    byte getAsByte();
-    float getAsFloat();
-    double getAsDouble();
-    short getAsShort();
-    long getAsLong();
-
+public interface JsonNumber extends JsonPrimitive, Comparable<Number>, Parameter {
 }

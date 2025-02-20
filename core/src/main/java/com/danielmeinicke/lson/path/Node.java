@@ -23,7 +23,7 @@ import org.jetbrains.annotations.Nullable;
  * <p>This interface extends {@link CharSequence}, allowing operations on textual representations
  * of JSON Path components, such as string manipulation or parsing.</p>
  */
-public interface Node extends CharSequence, Parameter {
+public interface Node extends CharSequence, Parameter, Selector {
 
     /**
      * Retrieves the name of this node, if applicable.

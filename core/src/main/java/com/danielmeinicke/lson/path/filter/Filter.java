@@ -11,8 +11,7 @@ import org.jetbrains.annotations.NotNull;
  */
 public interface Filter extends Selector, Parameter {
 
-    @NotNull
-    Parameter getPrimary();
+    @NotNull Parameter getPrimary();
 
     /**
      * Validates whether the provided JSON data satisfies the criteria defined by
