@@ -54,7 +54,7 @@ public final class ExistenceFilter implements Filter {
 
     @Override
     public @NotNull String toString() {
-        return getPrimary().toString();
+        return (isInverted() ? "!" : "") + getPrimary();
     }
 
 }

@@ -2,6 +2,7 @@ package com.danielmeinicke.lson.path;
 
 import com.danielmeinicke.lson.Json;
 import com.danielmeinicke.lson.path.filter.Filter;
+import com.danielmeinicke.lson.path.filter.Parameter;
 import com.danielmeinicke.lson.path.segment.Segment;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
@@ -88,7 +89,8 @@ public final class Builder {
 
         @Contract(value = "_->this")
         public @NotNull NodeBuilder index(int index) {
-            selectors.add(new IndexImpl(index));
+            // todo: debug
+//            selectors.add(new JsonInteger(index));
             return this;
         }
 
@@ -186,49 +188,6 @@ public final class Builder {
         }
 
     }
-    static final class NameImpl implements Name {
-
-        private final @NotNull String string;
-
-        public NameImpl(@NotNull String string) {
-            this.string = string;
-        }
-
-        // CharSequence
-
-        @Override
-        public int length() {
-            return toString().length();
-        }
-        @Override
-        public char charAt(int index) {
-            return toString().charAt(index);
-        }
-        @Override
-        public @NotNull CharSequence subSequence(int start, int end) {
-            return toString().subSequence(start, end);
-        }
-
-        // Implementations
-
-        @Override
-        public boolean equals(@Nullable Object object) {
-            if (this == object) return true;
-            if (!(object instanceof Name)) return false;
-            @NotNull Name name = (Name) object;
-            return Objects.equals(toString(), name.toString());
-        }
-        @Override
-        public int hashCode() {
-            return Objects.hashCode(toString());
-        }
-
-        @Override
-        public @NotNull String toString() {
-            return string;
-        }
-
-    }
     static final class SlicingImpl implements Slicing {
 
         private final int start;
@@ -285,47 +244,6 @@ public final class Builder {
         }
 
     }
-    static final class IndexImpl implements Index {
-
-        private final int index;
-
-        public IndexImpl(int index) {
-            this.index = index;
-        }
-
-        // Getters
-
-        public int getIndex() {
-            return index;
-        }
-
-        // Modules
-
-        @Override
-        public int compareTo(@NotNull Integer o) {
-            return index - o;
-        }
-
-        // Implementations
-
-        @Override
-        public boolean equals(@Nullable Object object) {
-            if (this == object) return true;
-            if (!(object instanceof IndexImpl)) return false;
-            @NotNull Builder.IndexImpl that = (IndexImpl) object;
-            return getIndex() == that.getIndex();
-        }
-        @Override
-        public int hashCode() {
-            return Objects.hashCode(getIndex());
-        }
-
-        @Override
-        public @NotNull String toString() {
-            return String.valueOf(getIndex());
-        }
-
-    }
     static final class WildcardImpl implements Wildcard {
 
         // Object
@@ -341,7 +259,7 @@ public final class Builder {
         }
         @Override
         public int hashCode() {
-            return -1;
+            return toString().hashCode();
         }
 
         @Override
@@ -350,77 +268,44 @@ public final class Builder {
         }
 
     }
+    static final class RepeatableImpl implements Repeatable {
 
-    static final class JsonPathImpl implements JsonPath {
+        private final @NotNull List<Parameter> selectors = new LinkedList<>();
 
-        // Object
-
-        private final @NotNull Node @NotNull [] nodes;
-        private final @NotNull String original;
-
-        public JsonPathImpl(@NotNull Node @NotNull [] nodes, @NotNull String original) {
-            this.nodes = nodes;
-            this.original = original;
+        public RepeatableImpl(@NotNull Parameter @NotNull ... selectors) {
+            this.selectors.addAll(Arrays.asList(selectors));
         }
-
-        // Getters
-
-        @Override
-        public @NotNull Node @NotNull [] getNodes() {
-            return nodes;
+        public RepeatableImpl(@NotNull Collection<? extends Parameter> selectors) {
+            this.selectors.addAll(selectors);
         }
 
         // Modules
 
         @Override
-        public boolean contains(@NotNull Json json) {
-            return false;
+        public @NotNull Stream<Parameter> stream() {
+            return selectors.stream();
         }
-
         @Override
-        public @Nullable Json get(@NotNull Json json) {
-            return null;
-        }
-
-        // CharSequence
-
-        @Override
-        public int length() {
-            return toString().length();
-        }
-
-        @Override
-        public char charAt(int index) {
-            return toString().charAt(index);
-        }
-
-        @Override
-        public @NotNull CharSequence subSequence(int start, int end) {
-            return toString().subSequence(start, end);
-        }
-
-        // Implementations
-
-        @Override
-        public boolean equals(@Nullable Object object) {
-            if (this == object) return true;
-            if (!(object instanceof JsonPath)) return false;
-            @NotNull JsonPath that = (JsonPath) object;
-            return Objects.deepEquals(getNodes(), that.getNodes());
-        }
-
-        @Override
-        public int hashCode() {
-            return Arrays.hashCode(getNodes());
+        public @NotNull Iterator<Parameter> iterator() {
+            return stream().iterator();
         }
 
         @Override
         public @NotNull String toString() {
-            return original;
+            @NotNull StringBuilder builder = new StringBuilder();
+
+            int row = 0;
+            for (@NotNull Parameter parameter : this) {
+                if (row > 0) builder.append(", ");
+
+                builder.append(parameter);
+                row++;
+            }
+
+            return builder.toString();
         }
 
     }
-
     static final class SegmentImpl implements Segment {
 
         private final @NotNull Selector @NotNull [] selectors;
@@ -462,6 +347,29 @@ public final class Builder {
             return Arrays.toString(selectors);
         }
 
+    }
+    static final class FilterImpl implements Filter {
+
+        private final @NotNull Parameter primary;
+
+        public FilterImpl(@NotNull Parameter primary) {
+            this.primary = primary;
+        }
+
+        @Override
+        public @NotNull Parameter getPrimary() {
+            return primary;
+        }
+
+        @Override
+        public boolean validate(@NotNull Json json) {
+            return false;
+        }
+
+        @Override
+        public String toString() {
+            return getPrimary().toString();
+        }
     }
 
 }
