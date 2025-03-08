@@ -152,7 +152,7 @@ public final class ComparisonOperatorFilter implements Filter {
 
         public static @Nullable ComparisonOperator getBySymbol(@NotNull String code) {
             for (@NotNull ComparisonOperator operator : values()) {
-                if (operator.getSymbol().equalsIgnoreCase(code)) {
+                if (operator.getSymbol().equals(code)) {
                     return operator;
                 }
             }

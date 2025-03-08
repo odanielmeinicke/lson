@@ -240,7 +240,7 @@ final class JsonPathImpl implements JsonPath {
             } else {
                 instance = names.get(0);
             }
-        } else if (selector.startsWith("@") || selector.startsWith("$")) {
+        } else if (selector.startsWith("@") || selector.startsWith("$") || selector.startsWith(".")) {
             instance = readNode(selector);
         } else if ((inside || selector.startsWith("?")) && (selector.length() > 3 && selector.charAt(inside ? 0 : 1) == '(' && selector.charAt(selector.length() - 1) == ')')) { // Filter
             selector = selector.substring(inside ? 1 : 2, selector.length() - 1);
@@ -255,13 +255,7 @@ final class JsonPathImpl implements JsonPath {
             @Nullable Operator operator = null;
             @Nullable Parameter secondary = null;
 
-            // Node
-            @NotNull String node = selector.startsWith("!") ? selector.substring(1) : selector;
-            node = node.trim();
-
-            if (node.startsWith("@") || node.startsWith("$")) {
-                primary = readNode(node);
-            } else {
+            {
                 char[] chars = selector.toCharArray();
                 for (int row = 0; row < chars.length; row++) {
                     char c = chars[row];
@@ -282,18 +276,24 @@ final class JsonPathImpl implements JsonPath {
                         } else if (!quotes && operator == null && (next != null && ((c == '&' && next == '&') || (c == '|' && next == '|') || (c == '=' && next == '=') || (c == '!' && next == '=') || (c == '<' && next == '=') || (c == '>' && next == '='))) || (c == '>' || c == '<')) {
                             operator = ComparisonOperator.getBySymbol(String.valueOf(c));
 
-                            if (operator == null && next != null) {
+                            if (next != null) {
                                 operator = ComparisonOperator.getBySymbol(new String(new char[]{c, next}));
-                            } else {
+                            } if (operator == null) {
                                 throw new NodeParseException("cannot parse comparison operator: " + (next != null ? new String(new char[]{c, next}) : String.valueOf(c)));
                             }
                         } else {
                             continue;
                         }
 
+                        // ?(@.pages > 100 && @.edition == 'Second')
+                        // ?(@.pages > 100 && @.edition == 'Second' && @.version == '1.0')
+                        // ?(@.pages > 100 && (@.edition == 'Second' && @.version == '1.0'))
+                        // ?(@.pages > 100 && (@.edition == 'Second' && @.version == '1.0') && @.pages < 400)
+
                         // Primary
-                        @NotNull String p = selector.substring(0, row);
+                        @NotNull String p = selector.substring(0, row - 1);
                         primary = (Parameter) readSelector(p, true);
+                        System.out.println("Primary: '" + p + "'");
 
                         // Secondary
                         @NotNull String s = selector.substring(row + 1);
@@ -303,6 +303,7 @@ final class JsonPathImpl implements JsonPath {
                             s = s + ")";
                         }
 
+                        System.out.println("Secondary: '" + s + "'");
                         secondary = (Parameter) readSelector(s, true);
                     }
 
