@@ -138,7 +138,7 @@ public interface Node extends CharSequence, Parameter, Selector {
         /** Represents the current (`@`) node in the JSON hierarchy. */
         CURRENT('@'),
 
-        /** Represents the deep-scan (`..`) operator for recursive searches. */
+        /** Represents the deep-scan (`.`) operator for recursive searches. */
         DEEP_SCAN('.');
 
         private final char character;

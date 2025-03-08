@@ -4,6 +4,7 @@ import com.danielmeinicke.lson.Json;
 import com.danielmeinicke.lson.JsonInteger;
 import com.danielmeinicke.lson.JsonString;
 import com.danielmeinicke.lson.exception.path.NodeParseException;
+import com.danielmeinicke.lson.path.Node.Type;
 import com.danielmeinicke.lson.path.filter.*;
 import com.danielmeinicke.lson.path.filter.ArithmeticOperatorFilter.ArithmeticOperator;
 import com.danielmeinicke.lson.path.filter.ComparisonOperatorFilter.ComparisonOperator;
@@ -12,26 +13,34 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 
-public final class JsonPathImpl implements JsonPath {
+final class JsonPathImpl implements JsonPath {
 
     // Static initializers
 
     static @NotNull JsonPath readPath(@NotNull String string) {
         final @NotNull String original = string;
+
+        if (!string.startsWith("$")) {
+            throw new IllegalStateException("a json path expression must start with '$'");
+        }
+
         @NotNull List<Node> nodes = new LinkedList<>();
 
         // Split all nodes at the string
         {
             @NotNull List<Integer> split = new LinkedList<>();
+            split.add(0);
 
             boolean escaped = false;
-            boolean quotes = false; // true if a ' or " has found
+            boolean quotes = false; // true if an ' or " has found
             @NotNull LinkedList<Integer> brackets = new LinkedList<>(); // a list containing all '[' indexes
 
-            int row = 0;
-            for (char character : original.toCharArray()) {
+            char[] chars = original.toCharArray();
+            for (int row = 0; row < chars.length; row++) {
+                char character = chars[row];
+                @Nullable Character previous = row > 0 ? chars[row - 1] : null;
+
                 final boolean isQuotes = (character == '"' || character == '\'');
 
                 // Escaped
@@ -46,7 +55,9 @@ public final class JsonPathImpl implements JsonPath {
 
                 // Check if is a node split
                 if (character == '.' && brackets.isEmpty()) {
-                    split.add(row);
+                    if (previous == null || previous != '.') {
+                        split.add(row);
+                    }
                 } else if (!quotes) {
                     if (character == '[') {
                         brackets.add(row);
@@ -63,8 +74,6 @@ public final class JsonPathImpl implements JsonPath {
                 if (character != '\\') {
                     escaped = false;
                 }
-
-                row++;
             }
 
             if (!brackets.isEmpty()) {
@@ -72,16 +81,16 @@ public final class JsonPathImpl implements JsonPath {
             }
 
             // Finish
-            for (row = 0; row < split.size(); row++) {
+            for (int row = 0; row < split.size(); row++) {
                 // Get start and end substring indexes
                 int start = split.get(row);
                 int end = row + 1 < split.size() ? split.get(row + 1) : original.length();
 
                 // Remove split nodes
                 if (original.charAt(start) == '.') start += 1;
-                else start += 2;
 
                 // Add node to list
+                System.out.println("Node: '" + original.substring(start, end).trim() + "'");
                 nodes.add(readNode(original.substring(start, end).trim()));
             }
         }
@@ -90,10 +99,107 @@ public final class JsonPathImpl implements JsonPath {
         return new JsonPathImpl(nodes.toArray(new Node[0]), original);
     }
     static @NotNull Node readNode(@NotNull String node) {
-        return new Builder.NodeImpl("test", node, new Segment[0], null);
+        // Variables
+        final @NotNull String original = node;
+
+        // Retrieve node type
+        @Nullable Type type = Arrays.stream(Type.values()).filter(t -> t.getCharacter() == original.charAt(0)).findFirst().orElse(null);
+        if (type != null) {
+            node = node.substring(1);
+        }
+
+        // Retrieve node name
+        @Nullable String name = null;
+
+        if (!node.startsWith("[") && !node.startsWith(".")) {
+            if (type != null && type != Type.DEEP_SCAN) {
+                throw new NodeParseException("the node with type '" + type + "' cannot have an explicit name: " + node);
+            }
+
+            int index = node.indexOf('[');
+            name = node.substring(0, index == -1 ? node.length() : index);
+            node = node.substring(name.length());
+        }
+
+        // Retrieve segments
+        @NotNull List<Segment> segments = new LinkedList<>();
+
+        if (node.startsWith("[")) {
+            @NotNull List<String> segmentsRaw = new LinkedList<>();
+
+            boolean escaped = false;
+            boolean quotes = false;
+            @NotNull LinkedList<Integer> brackets = new LinkedList<>();
+
+            @NotNull LinkedList<Integer> split = new LinkedList<>();
+            split.add(0);
+
+            // Loop each character to split segments
+            char[] chars = node.toCharArray();
+            for (int row = 0; row < chars.length; row++) {
+                char character = chars[row];
+                @Nullable Character previous = row > 0 ? chars[row - 1] : null;
+
+                final boolean isQuotes = (character == '"' || character == '\'');
+
+                // Escaped
+                if (character == '\\') {
+                    escaped = true;
+                }
+
+                // Mark quotes
+                if (!escaped && isQuotes) {
+                    quotes = !quotes;
+                }
+
+                // Check if is a node split
+                if (!quotes) {
+                    if (character == '[') {
+                        brackets.add(row);
+                    } else if (character == ']') {
+                        if (!brackets.isEmpty()) {
+                            if (brackets.size() == 1) {
+                                split.add(row + 1);
+                            }
+
+                            brackets.removeLast();
+                        } else {
+                            throw new IllegalStateException("illegal close bracket at index " + row + ": " + original);
+                        }
+                    }
+                }
+
+                // Finish
+                if (character != '\\') {
+                    escaped = false;
+                }
+            }
+
+            // Split parts
+            for (int row = 0; row < split.size(); row++) {
+                // Get start and end substring indexes
+                int start = split.get(row);
+                int end = row + 1 < split.size() ? split.get(row + 1) : node.length();
+
+                // Retrieve segment and filter
+                @NotNull String segmentRaw = node.substring(start, end).trim();
+                if (segmentRaw.isEmpty()) continue;
+
+                // Add segment to list
+                segmentsRaw.add(segmentRaw);
+            }
+
+            // Parse segments
+            for (@NotNull String segmentRaw : segmentsRaw) {
+                segments.add(readSegment(segmentRaw));
+            }
+        }
+
+        // Finish
+        return new Builder.NodeImpl(name, original, segments.toArray(new Segment[0]), type);
     }
     static @NotNull Segment readSegment(@NotNull String segment) {
-        return null;
+        return new Builder.SegmentImpl(readSelector(segment.substring(1, segment.length() - 1), false));
     }
     static @NotNull Selector readSelector(@NotNull String selector, boolean inside) {
         selector = selector.trim();
@@ -276,65 +382,6 @@ public final class JsonPathImpl implements JsonPath {
 
         // Finish
         return instance;
-    }
-
-    public static void main(String[] args) {
-        // Variables
-        @NotNull String path = "?(5+(1+(2+(3+(4+(5+(6+(7+(8+(9+1))))))))))";
-
-        {
-            // ‘Warm-up’ to avoid JVM optimizations at the first tests
-            for (int i = 0; i < 100; i++) {
-                readSelector(path, false);
-            }
-
-            // Generate timing results
-            long totalNanoTime = 0;
-            int times = 1000;
-
-            for (int i = 0; i < times; i++) {
-                long start = System.nanoTime();
-                readSelector(path, false);
-                long duration = System.nanoTime() - start;
-                totalNanoTime += duration;
-            }
-
-            long media = totalNanoTime / times;
-            System.out.println("Took ±" + TimeUnit.NANOSECONDS.toMillis(media) + "ms (" + media + "ns) to parse path.");
-        }
-
-        // Generate tree
-        @NotNull Selector selector = readSelector(path, false);
-
-        System.out.println("Json Path tree:");
-
-        if (selector instanceof Parameter) {
-            @NotNull Parameter parameter = (Parameter) selector;
-            printTree(parameter, "  ");
-        } else {
-            System.out.println("  |- " + selector + " (" + selector.getClass().getSimpleName().replace("Impl", "") + ")");
-        }
-    }
-    private static void printTree(@NotNull Parameter parameter, @NotNull String prefix) {
-        if (parameter instanceof Filter && !(parameter instanceof ArithmeticOperatorFilter) && !(parameter instanceof ComparisonOperatorFilter) && !(parameter instanceof ExistenceFilter)) {
-            @NotNull Filter filter = (Filter) parameter;
-            printTree(((Filter) parameter).getPrimary(), prefix);
-        } else {
-            System.out.println(prefix + "|- " + parameter + " (" + parameter.getClass().getSimpleName().replace("Impl", "") + ")");
-
-            if (parameter instanceof ArithmeticOperatorFilter) {
-                @NotNull ArithmeticOperatorFilter arithmetic = (ArithmeticOperatorFilter) parameter;
-                printTree(arithmetic.getPrimary(), prefix + "  ");
-                printTree(arithmetic.getSecondary(), prefix + "  ");
-            } else if (parameter instanceof ComparisonOperatorFilter) {
-                @NotNull ComparisonOperatorFilter comparison = (ComparisonOperatorFilter) parameter;
-                printTree(comparison.getPrimary(), prefix + "  ");
-                printTree(comparison.getSecondary(), prefix + "  ");
-            } else if (parameter instanceof ExistenceFilter) {
-                @NotNull ExistenceFilter comparison = (ExistenceFilter) parameter;
-                printTree(comparison.getPrimary(), prefix + "  ");
-            }
-        }
     }
 
     // Object

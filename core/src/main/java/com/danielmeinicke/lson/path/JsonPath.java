@@ -2,7 +2,6 @@ package com.danielmeinicke.lson.path;
 
 import com.danielmeinicke.lson.Json;
 import com.danielmeinicke.lson.exception.path.NodeNotFoundException;
-import com.danielmeinicke.lson.path.segment.Segment;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -21,18 +20,8 @@ public interface JsonPath extends Serializable, CharSequence {
 
     // Static initializers
 
-    public static void main(String[] args) {
-        @NotNull JsonPath path = JsonPathImpl.readPath("$.node[?(@.name < 10)][?(@.name)][?(@.name['test'])].e.['test . []', 'ada'][0][ 3 3 ][0:][::12]");
-
-        for (@NotNull Node node : path.getNodes()) {
-            System.out.println(node + ":");
-
-            for (@NotNull Segment segment : node.getSegments()) {
-                System.out.println("    " + segment + ": " + segment.getClass().getSimpleName() + " - " + segment.stream().toArray(Selector[]::new)[0].getClass().getSimpleName());
-            }
-        }
-
-//        System.out.println(path);
+    static @NotNull JsonPath parse(@NotNull String string) {
+        return JsonPathImpl.readPath(string);
     }
 
     // Object
