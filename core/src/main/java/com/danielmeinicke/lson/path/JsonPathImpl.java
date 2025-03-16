@@ -90,7 +90,6 @@ final class JsonPathImpl implements JsonPath {
                 if (original.charAt(start) == '.') start += 1;
 
                 // Add node to list
-                System.out.println("Node: '" + original.substring(start, end).trim() + "'");
                 nodes.add(readNode(original.substring(start, end).trim()));
             }
         }
@@ -246,93 +245,75 @@ final class JsonPathImpl implements JsonPath {
             selector = selector.substring(inside ? 1 : 2, selector.length() - 1);
             @Nullable String parameter = null;
 
-            @NotNull Inside parenthesis = new Inside();
-            boolean quotes = false;
             boolean inverted = selector.charAt(0) == '!';
 
-            // Parameters
-            @Nullable Parameter primary = null;
-            @Nullable Operator operator = null;
-            @Nullable Parameter secondary = null;
+            // ?(@.pages > 100 && @.edition == 'Second')
+            // ?(@.pages > 100 && @.edition == 'Second' && @.version == '1.0')
+            // ?(@.pages > 100 && (@.edition == 'Second' && @.version == '1.0'))
+            // ?(@.pages > 100 && (@.edition == 'Second' && @.version == '1.0') && @.pages < 400)
+
+            // Selectors
+            @NotNull List<Parameter> parameters = new LinkedList<>();
 
             {
+                // Retrieve operators
+                @NotNull Map<Integer, Operator> operators = new TreeMap<>();
+
+                boolean quotes = false;
+                @NotNull Inside parenthesis = new Inside();
+
                 char[] chars = selector.toCharArray();
                 for (int row = 0; row < chars.length; row++) {
-                    char c = chars[row];
-                    @Nullable Character previous = row > 0 ? chars[row - 1] : null;
-                    @Nullable Character next = row + 1 > chars.length ? chars[row + 1] : null;
-
                     // Variables
-                    if ((c == '"' || c == '\'') && (previous == null || previous != '\\')) {
+                    char character = chars[row];
+                    @Nullable Character previous = row > 0 ? chars[row - 1] : null;
+                    @Nullable Character next = chars.length > row + 1 ? chars[row + 1] : null;
+
+                    // Check characters
+                    if (character == '\'' || character == '"') {
                         quotes = !quotes;
-                    } else if (!quotes && c == '(') {
-                        parenthesis.add(row);
-                    } else if (!quotes && c == ')') {
-                        int start = parenthesis.remove();
-                        parameter = selector.substring(start, row + 1);
-                    } else {
-                        if (!quotes && operator == null && (c == '+' || c == '-' || c == '*' || c == '/' || c == '%')) {
-                            operator = ArithmeticOperator.getBySymbol(String.valueOf(c));
-                        } else if (!quotes && operator == null && (next != null && ((c == '&' && next == '&') || (c == '|' && next == '|') || (c == '=' && next == '=') || (c == '!' && next == '=') || (c == '<' && next == '=') || (c == '>' && next == '='))) || (c == '>' || c == '<')) {
-                            operator = ComparisonOperator.getBySymbol(String.valueOf(c));
-
-                            if (next != null) {
-                                operator = ComparisonOperator.getBySymbol(new String(new char[]{c, next}));
-                            } if (operator == null) {
-                                throw new NodeParseException("cannot parse comparison operator: " + (next != null ? new String(new char[]{c, next}) : String.valueOf(c)));
-                            }
-                        } else {
-                            continue;
+                    } else if (!quotes) {
+                        if (character == '(') {
+                            parenthesis.add(row);
+                        } else if (character == ')') {
+                            parenthesis.remove();
                         }
-
-                        // ?(@.pages > 100 && @.edition == 'Second')
-                        // ?(@.pages > 100 && @.edition == 'Second' && @.version == '1.0')
-                        // ?(@.pages > 100 && (@.edition == 'Second' && @.version == '1.0'))
-                        // ?(@.pages > 100 && (@.edition == 'Second' && @.version == '1.0') && @.pages < 400)
-
-                        // Primary
-                        @NotNull String p = selector.substring(0, row - 1);
-                        primary = (Parameter) readSelector(p, true);
-                        System.out.println("Primary: '" + p + "'");
-
-                        // Secondary
-                        @NotNull String s = selector.substring(row + 1);
-                        s = s.trim();
-
-                        if (s.startsWith("(") && !s.endsWith(")")) {
-                            s = s + ")";
-                        }
-
-                        System.out.println("Secondary: '" + s + "'");
-                        secondary = (Parameter) readSelector(s, true);
                     }
 
-                    // Parse parameter
-                    if (parameter != null) try {
-                        if (primary == null) {
-                            primary = (Parameter) readSelector(parameter, true);
-                        } else if (secondary == null) {
-                            secondary = (Parameter) readSelector(parameter, true);
-                        }
-                    } catch (@NotNull NodeParseException e) {
-                        throw new NodeParseException("cannot parse selector's parameter: '" + parameter + "'", e);
-                    } catch (@NotNull ClassCastException e) {
-                        throw new NodeParseException("invalid selector parameter: '" + parameter + "'", e);
+                    if (parenthesis.size() > 0) {
+                        continue;
+                    }
+
+                    // Operator
+                    @Nullable Operator operator = null;
+
+                    if (next != null) {
+                        operator = Operator.getBySymbol(String.valueOf(character + next));
+                        row++;
+                    } if (operator == null) {
+                        operator = Operator.getBySymbol(String.valueOf(character));
+                    }
+
+                    // Finish
+                    if (operator != null) {
+                        operators.put(row, operator);
                     }
                 }
+
+                //
+            }
+            char[] chars = selector.toCharArray();
+            for (int row = 0; row < chars.length; row++) {
+                char character = chars[row];
+                @Nullable Character previous = row > 0 ? chars[row - 1] : null;
+                @Nullable Character next = chars.length > row + 1 ? chars[row + 1] : null;
+
+
             }
 
-            if (operator instanceof ArithmeticOperator) {
-                instance = new Builder.FilterImpl(new ArithmeticOperatorFilter(primary, secondary, (ArithmeticOperator) operator));
-            } else if (operator instanceof ComparisonOperator) {
-                instance = new Builder.FilterImpl(new ComparisonOperatorFilter(primary, secondary, (ComparisonOperator) operator));
-            } else {
-                if (!(primary instanceof Node)) {
-                    throw new NodeParseException("the parameter '" + primary + "' must be a node to parse the existence filter: " + selector);
-                }
-
-                instance = new ExistenceFilter((Node) primary, inverted);
-            }
+            // Finish
+            //noinspection ConstantValue
+            instance = parameters.size() == 1 ? (Selector) parameters.get(0) : new Builder.RepeatableImpl(parameters.toArray(new Parameter[0]));
         } else if (selector.contains(":")) { // Array Slicing
             // Split parts
             @NotNull String[] parts = selector.split(":", -1); // -1 para preservar partes vazias
